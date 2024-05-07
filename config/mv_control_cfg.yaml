@@ -1,0 +1,27 @@
+pretrained_model_name_or_path: 'mvcontrol_lib/ckpts'
+pretrained_unet_path: 'mvcontrol_lib/ckpts'
+pretrained_controlnet_path: 'mvcontrol_lib/ckpts'
+revision: null
+
+seed: 42
+
+validation_guidance_scales: [1.0]
+pipe_validation_kwargs:
+  eta: 1.0
+
+pipe_kwargs:
+  camera_embedding_type: 'e_de_da_sincos'
+  num_views: 6
+
+unet_from_pretrained_kwargs:
+  camera_embedding_type: 'e_de_da_sincos'
+  projection_class_embeddings_input_dim: 10  # modify
+  num_views: 6
+  sample_size: 32
+  zero_init_conv_in: false
+  zero_init_camera_projection: false
+  cd_attention_last: false
+  cd_attention_mid: true
+  multiview_attention: true
+  sparse_mv_attention: false
+  mvcd_attention: false

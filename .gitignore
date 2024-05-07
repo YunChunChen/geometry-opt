@@ -1,0 +1,11 @@
+*.ipynb_checkpoints
+
+*.pyc
+
+*.swp
+
+__pycache__
+
+*.pt
+*.pth
+*.ckpt

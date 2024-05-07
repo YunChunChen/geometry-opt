@@ -1,0 +1,34 @@
+exp:
+    save_dir: ''
+    num_iters: 1000
+
+data:
+    mesh_path: 'rem/elephant_pose1.obj'
+    mesh_scale: 1.0
+    num_subdiv: 0
+    rotate_mesh: False
+    gt_from: ''
+
+optim:
+    adam_lr: 1e-2
+    largesteps_lr: 1e-3
+    lambda_: 10
+
+renderer:
+    resolution: 512
+
+controlnet:
+    input_mode: 'depth'
+    pred_depth: True
+    pred_normal: True
+    num_samples: 1
+    resolution: 512
+    ddim_steps: 20
+    guess_mode: False
+    strength: 1.0
+    scale: 9.0
+    eta: 1.0
+    seed: 12345
+    prompt: 'An image of a cartoon style elephant standing on the ground with two feet. The image has a plain background.'
+    a_prompt: 'Best quality'
+    n_prompt: 'low-res, worse quality, cropped'

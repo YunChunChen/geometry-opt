@@ -1,246 +1,197 @@
-import torch
-import torch.nn.functional as F
 import nvdiffrast.torch as dr
+import torch
+
+from meshopt_lib.core.calc_vertex_normals import calc_vertex_normals
 
 class Renderer:
+    
+    def __init__(
+        self, 
+        mv, 
+        proj, 
+        image_size
+    ):
+        self._mv = mv # C x 4 x 4
+        self._mvp = proj @ mv # C x 4 x 4
+        self._image_size = image_size
+        self._glctx = dr.RasterizeCudaContext()
 
-    def __init__(self, cfg):
-        self.resolution = cfg.renderer.resolution
-        self.glctx = self.get_rasterizor()
-
-        # camera intrinsic parameters
-        self.fl = torch.tensor([0.15], dtype=torch.float32, device='cuda', requires_grad=True)
-        self.n  = torch.tensor([ 0.1], dtype=torch.float32, device='cuda', requires_grad=False)
-        self.f  = torch.tensor([10.0], dtype=torch.float32, device='cuda', requires_grad=False)
-
-        # camera extrinsic parameters
-        self.x = torch.tensor([ 0.0], dtype=torch.float32, device='cuda', requires_grad=True)
-        self.y = torch.tensor([ 0.0], dtype=torch.float32, device='cuda', requires_grad=True)
-        self.z = torch.tensor([-3.5], dtype=torch.float32, device='cuda', requires_grad=True)
-
-    def transform_pos(self, mtx, pos):
+    def transform_pos(
+        self, 
+        mtx, 
+        pos
+    ):
         posw = torch.cat([pos, torch.ones([pos.shape[0], 1]).cuda()], axis=1)
-        return torch.matmul(posw, mtx.t())[None, ...]
+        return torch.matmul(posw, mtx.transpose(-2, -1))
 
-    def get_camera_intrinsics(self):
-        return self.fl, self.n, self.f
+    def disconnect_mesh(
+        self, 
+        vertices, 
+        faces
+    ):
+        new_vertices = vertices[faces.reshape(-1)].reshape(-1, 3)
+        new_faces = (
+            torch.arange(0, new_vertices.shape[0], dtype=torch.int64)
+            .reshape(-1, 3)
+            .to(new_vertices.device)
+        )
+        return new_vertices, new_faces
 
-    def get_camera_extrinsics(self):
-        return self.x, self.y, self.z
+    def render_silhouette(
+        self, 
+        vertices, 
+        faces, 
+        shading='smooth'
+    ):
+        if shading == 'flat':
+            vertices, faces = self.disconnect_mesh(vertices, faces) 
 
-    def init_proj(self):
-        zero = torch.tensor([0.0], dtype=torch.float32, device='cuda')
-        one  = torch.tensor([1.0], dtype=torch.float32, device='cuda')
-
-        proj_mat = torch.stack((
-            1.0/self.fl, zero, zero, zero,
-            zero, 1.0/self.fl, zero, zero,
-            zero, zero, -(self.f+self.n)/(self.f-self.n), -(2*self.f*self.n)/(self.f-self.n),
-            zero, zero, -1*one, zero
-        )).view(4,4).cuda()
-
-        return proj_mat
-
-    def init_mv(self):
-        zero = torch.tensor([0.0], dtype=torch.float32, device='cuda')
-        one  = torch.tensor([1.0], dtype=torch.float32, device='cuda')
-
-        mv_mat = torch.stack((
-             one, zero, zero, self.x,
-            zero,  one, zero, self.y,
-            zero, zero,  one, self.z,
-            zero, zero, zero,    one
-        )).view(4,4).cuda()
-
-        return mv_mat
-
-    def get_rasterizor(self):
-        glctx = dr.RasterizeCudaContext()
-        return glctx
-
-    def render_depth(self, mesh, normalize=False):
-        verts = mesh.get_vertices().clone()
-        faces = mesh.get_faces().clone()
-
-        # initialize the projection and model view matrices
-        proj_mat = self.init_proj()
-        mv_mat   = self.init_mv()
-
-        # compute the mvp matrix
-        mvp_mat = torch.matmul(proj_mat, mv_mat)
+        faces = faces.type(torch.int32)
 
         # transform vertices to clip space
-        verts_clip = self.transform_pos(mvp_mat, verts)
+        # - vertices_clip: num_cameras x num_verts x 4
+        vertices_clip = self.transform_pos(self._mvp, vertices) 
 
         # rasterization
-        rast, _ = dr.rasterize(
-            self.glctx, 
-            verts_clip, 
+        rast_out, _ = dr.rasterize(self._glctx, vertices_clip, faces, resolution=self._image_size)
+
+        # vertex attributes = all ones
+        shape = (1, vertices.size(0), vertices.size(1)+1)
+        verts_attr    = torch.ones(size=shape, dtype=torch.float32, device=vertices.device)
+        silhouette, _ = dr.interpolate(verts_attr, rast_out, faces)
+
+        alpha = torch.clamp(rast_out[..., -1:], max=1) #C,H,W,1
+        silhouette = torch.concat((silhouette, alpha), dim=-1) #C,H,W,4
+
+        # antialiasing
+        # - normal: num_cameras x h x w x 4
+        silhouette = dr.antialias(silhouette, rast_out, vertices_clip, faces) #C,H,W,4
+        silhouette = silhouette[...,0].contiguous()
+
+        return silhouette
+
+    def render_depth(
+        self, 
+        vertices, 
+        faces, 
+        normalize=False, 
+        shading='smooth'
+    ):
+        if shading == 'flat':
+            vertices, faces = self.disconnect_mesh(vertices, faces) 
+
+        faces = faces.type(torch.int32)
+
+        # transform vertices to clip space
+        # - vertices_clip: num_cameras x num_verts x 4
+        vertices_clip = self.transform_pos(self._mvp, vertices) 
+        
+        # rasterization
+        rast_out,_ = dr.rasterize(
+            self._glctx, 
+            vertices_clip, 
             faces, 
-            resolution=[self.resolution, self.resolution]
+            resolution=self._image_size
         )
 
-        # vertex coordinate transformation
-        verts_camera = self.transform_pos(mv_mat, verts)
+        # convert vertex positions from world frame to camera frame
+        # - verts_camera: num_cameras x num_verts x 4
+        verts_camera = self.transform_pos(self._mv, vertices)
 
         # vertex attribute buffer
-        verts_attr = torch.zeros(size=verts.size(), dtype=torch.float32, device='cuda').unsqueeze(0)
-        
+        # - verts_attr: num_cameras x num_verts x 3
+        shape = (verts_camera.size(0), verts_camera.size(1), 3)
+        verts_attr = torch.zeros(size=shape, dtype=torch.float32, device='cuda')
+
         # duplicate z coordinates
-        verts_attr[:,:,0] = verts_camera[:,:,2]
-        verts_attr[:,:,1] = verts_camera[:,:,2]
-        verts_attr[:,:,2] = verts_camera[:,:,2]
+        verts_attr[..., 0] = verts_camera[..., 2]
+        verts_attr[..., 1] = verts_camera[..., 2]
+        verts_attr[..., 2] = verts_camera[..., 2]
 
         # interpolate depth
         # - background: 0
         # - far: smaller (negative)
         # - near: bigger (negative)
-        # - shape: 1 x h x w x 3
-        depth, _ = dr.interpolate(verts_attr, rast, faces)
+        # - shape: num_cameras x h x w x 3
+        depth, _ = dr.interpolate(verts_attr, rast_out, faces)
 
         # inverse the depth
         # - background: 0
         # - far: smaller (positive)
         # - near: bigger (positive)
-        # - shape: 1 x h x w x 3
-        depth = torch.where(rast[..., -1:] != 0, -1.0 / depth, 0.0)
+        # - shape: num_cameras x h x w x 3
+        depth = torch.where(rast_out[..., -1:] != 0, -1.0 / depth, 0.0)
 
-        # antialias 
-        # - shape: h x w
-        depth = dr.antialias(depth, rast, verts_clip, faces)[0,:,:,0]
+        # antialiasing
+        # - depth: num_cameras x h x w x 4
+        depth = dr.antialias(depth, rast_out, vertices_clip, faces)
 
-        # flip the depth (memory order in OpenGL)
-        depth = torch.flip(depth, [0])
+        # - depth: num_cameras x h x w
+        depth = depth[...,0].contiguous()
 
-        # normalize depth
+        # normalizing
         if normalize:
             depth = depth / torch.max(depth)
 
         return depth
-    
-    def render_silhouette(self, mesh):
-        verts = mesh.get_vertices().clone()
-        faces = mesh.get_faces().clone()
 
-        # initialize the projection and model view matrices
-        proj_mat = self.init_proj()
-        mv_mat   = self.init_mv()
+    def render_normal(
+        self, 
+        vertices, 
+        faces, 
+        model, 
+        shading='smooth'
+    ):
+        if shading == 'flat':
+            vertices, faces = self.disconnect_mesh(vertices, faces) 
 
-        # compute the mvp matrix
-        mvp_mat = torch.matmul(proj_mat, mv_mat)
+        vert_normals = calc_vertex_normals(vertices, faces)
 
-        # transform vertices to clip space
-        verts_clip = self.transform_pos(mvp_mat, verts)
-
-        # rasterization
-        rast, _ = dr.rasterize(
-            self.glctx, 
-            verts_clip, 
-            faces, 
-            resolution=[self.resolution, self.resolution]
-        )
-        # vertex attributes = all ones
-        shape = (1, verts.size(0), verts.size(1)+1)
-        verts_attr    = torch.ones(size=shape, dtype=torch.float32, device=verts.device)
-        silhouette, _ = dr.interpolate(verts_attr, rast, faces)
-
-        # antialias
-        # - shape: h x w
-        silhouette = dr.antialias(silhouette, rast, verts_attr, faces)[0,:,:,0]
-
-        # flip the silhouette
-        silhouette = torch.flip(silhouette, [0])
-
-        return silhouette
-
-    def render_normal(self, mesh, antialias=False):
-        verts = mesh.get_vertices().clone()
-        faces = mesh.get_faces().clone()
-        vert_normals = mesh.get_vertex_normals().clone()
-
-        # initialize the projection and model view matrices
-        proj_mat = self.init_proj()
-        mv_mat   = self.init_mv()
-
-        # compute the mvp matrix
-        mvp_mat = torch.matmul(proj_mat, mv_mat)
+        faces = faces.type(torch.int32)
 
         # transform vertices to clip space
-        verts_clip = self.transform_pos(mvp_mat, verts)
-
+        # - vertices_clip: num_cameras x num_verts x 4
+        vertices_clip = self.transform_pos(self._mvp, vertices) 
+        
         # rasterization
-        rast, _ = dr.rasterize(
-            self.glctx, 
-            verts_clip, 
+        rast_out,_ = dr.rasterize(
+            self._glctx, 
+            vertices_clip, 
             faces, 
-            resolution=[self.resolution, self.resolution]
+            resolution=self._image_size
         )
 
-        # vertex normals transformation world frame -> camera frame
-        # - shape: 1 x num_verts x 3
-        vert_normals_camera = self.transform_pos(mv_mat.inverse().t(), vert_normals)[:,:,:3].contiguous()
-        #vert_normals_camera = self.transform_pos(mv_mat, vert_normals)[:,:,:3].contiguous()
-        #vert_normals_camera = vert_normals.unsqueeze(0) # -> inner product is correct
-        vert_normals_camera[:,:,0] *= -1.0
-        #vert_normals_camera[:,:,1] *= -1.0
-        #vert_normals_camera[:,:,2] *= -1.0
+        # convert vertex normals from world frame to camera frame
+        # - vert_normals_camera: num_cameras x num_verts x 3
+        if model == 'Wonder3D_renderer':
+            vert_normals_camera = self.transform_pos(self._mv.inverse().transpose(-2, -1), vert_normals)[..., :3].contiguous()
+
+        # Wonder3D prediction (world frame)
+        elif model == 'Wonder3D_output':
+            vert_normals_camera = vert_normals.clone()
+
+        # ControlNet
+        elif model == 'ControlNet':
+            vert_normals_camera = vert_normals.clone()
+            vert_normals_camera[..., 0] *= -1.0
 
         # interpolate vertex normals
-        # - shape: 1 x h x w x 3
-        pixel_normals, _ = dr.interpolate(vert_normals_camera, rast, faces)
+        # - pixel_normals: num_cameras x h x w x 3
+        pixel_normals, _ = dr.interpolate(vert_normals_camera, rast_out, faces)
 
-        # fill in zeros
-        # - background: [0, 0, 0]
-        # - shape: 1 x h x w x 3
-        zero_tensor = torch.zeros(3, dtype=torch.float32, device='cuda')
-        #zero_tensor = torch.tensor([0.0, 1.0, 1.0], dtype=torch.float32, device='cuda')
-        pixel_normals = torch.where(rast[..., -1:] != 0, pixel_normals, zero_tensor)
+        # get the silhouette
+        # - alpha: num_cameras x h x w x 1
+        alpha = torch.clamp(rast_out[..., -1:], max=1)
 
-        # antialias 
-        # - shape: h x w x 3
-        if antialias:
-            pixel_normals = dr.antialias(pixel_normals, rast, verts_clip, faces)[0,:,:,:]
-        else:
-            pixel_normals = pixel_normals[0,:,:,:]
+        # concatenate the normals and the silhouette
+        # - output: num_cameras x h x w x 4
+        output = torch.concat((pixel_normals, alpha), dim=-1)
 
-        # flip the depth (memory order in OpenGL)
-        pixel_normals = torch.flip(pixel_normals, [0])
+        # antialiasing
+        # - normal: num_cameras x h x w x 4
+        normal = dr.antialias(output, rast_out, vertices_clip, faces)
 
-        # transpose axes
-        # - shape: h x w x 3 -> 3 x h x w
-        pixel_normals = pixel_normals.transpose(2,1).transpose(1,0).contiguous()
+        # - normal: num_cameras x 3 x h x w
+        normal = normal[...,:3].transpose(3,2).transpose(2,1).contiguous()
 
-        # normalize the normal length
-        # - background: 0
-        # - foreground: 1
-        pixel_normals = F.normalize(pixel_normals, p=2, dim=0)
-
-        return pixel_normals
-    
-    def depth_to_pointcloud(self, depth):
-        # initialize the projection and model view matrices
-        proj_mat = self.init_proj()
-        mv_mat   = self.init_mv()
-
-        # compute the mvp matrix
-        mvp_mat = torch.matmul(proj_mat, mv_mat)
-        
-        # get mask
-        y, x = torch.where(depth != 0.0)
-
-        h, w = depth.size()
-
-        # get depth
-        z = depth[y, x]
-
-        x = (x - w/2.0) / w
-        y = (y - h/2.0) / h
-
-        # point cloud camera frame
-        ones = torch.ones(x.shape, dtype=torch.float32, device='cuda')
-        pc = torch.stack((x, y, z, ones), dim=-1)
-
-        # point cloud world frame
-        pc = torch.matmul(pc, mv_mat.inverse().t())
-
-        return pc
+        return normal

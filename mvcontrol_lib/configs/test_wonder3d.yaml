@@ -1,0 +1,17 @@
+pretrained_model_name_or_path: 'ckpts'
+validation_dataset:
+  root_dir: 'test_imgs/venus_1000' # the folder path stores testing images
+  num_views: 6
+  bg_color: 'black'
+  img_wh: [256, 256]
+  file_list: ['rgb_0.png', 'rgb_1.png', 'rgb_2.png']
+
+save_dir: 'wonder3d_results'
+
+seed: 42
+validation_batch_size: 1
+dataloader_num_workers: 8
+
+validation_guidance_scales: [1.0]
+pipe_validation_kwargs:
+  eta: 1.0

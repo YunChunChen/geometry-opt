@@ -1,0 +1,12 @@
+resolution: 512
+input_mode: 'depth'
+num_samples: 1
+ddim_steps: 20
+guess_mode: False
+strength: 1.0
+scale: 9.0
+eta: 1.0
+seed: 12345
+prompt: ''
+a_prompt: 'Best quality'
+n_prompt: 'low-res, worse quality, cropped'

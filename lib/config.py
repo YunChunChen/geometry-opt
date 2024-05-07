@@ -1,49 +1,45 @@
-from yacs.config import CfgNode as CN
+from dataclasses import dataclass
+from typing import Dict, Optional, List
 
-_C = CN()
+@dataclass
+class SVControlConfig:
+    resolution: int = 512
+    input_mode: str = 'depth'
+    num_samples: int = 1
+    ddim_steps: int = 20
+    guess_mode: bool = False
+    strength: float = 1.0
+    scale: float = 9.0
+    eta: float = 1.0
+    seed: int = 12345
+    prompt: str = ''
+    a_prompt: str = ''
+    n_prompt: str = ''
 
-# Experiment configs
-_C.exp = CN()
-_C.exp.save_dir = ''
-_C.exp.num_iters = 1000
-_C.exp.save_freq = 100   # save files every 100 iterations
-_C.exp.remeshing = False
-_C.exp.remesh_freq = 200 # remeshing every 200 iterations
+@dataclass
+class MVControlConfig:
+    pretrained_model_name_or_path: str
+    pretrained_unet_path: str
+    pretrained_controlnet_path: str
+    revision: Optional[str]
+    seed: Optional[int]
+    pipe_validation_kwargs: Dict
+    pipe_kwargs: Dict
+    validation_guidance_scales: List[float]
+    unet_from_pretrained_kwargs: Dict
+    strength: float = 1.0
+    resolution: int = 256
 
-# Data configs
-_C.data = CN()
-_C.data.mesh_path = ''
-_C.data.mesh_scale = 1.0 # mesh scaling factor
-_C.data.num_subdiv = 0   # number of subdivisions
-_C.data.gt_from = ''     # ground truth from [controlnet | some folder]
+@dataclass
+class MeshOptConfig:
+    num_iters: int
 
-# Optimizer configs
-_C.optim = CN()
-_C.optim.adam_lr = 1e-3
-_C.optim.largesteps_lr = 1e-3
-_C.optim.lambda_ = 10    # lambda for the largestep optimizer
-
-# Renderer configs
-_C.renderer = CN()
-_C.renderer.resolution = 512
-
-# ControlNet configs
-_C.controlnet = CN()
-_C.controlnet.from_depth = False  # controlnet input condition
-_C.controlnet.from_normal = False # controlnet input condition
-_C.controlnet.pred_depth = False  # controlnet output analysis
-_C.controlnet.pred_normal = False # controlnet output analysis
-_C.controlnet.num_samples = 1
-_C.controlnet.resolution = 512
-_C.controlnet.ddim_steps = 20
-_C.controlnet.guess_mode = False
-_C.controlnet.strength = 1.0
-_C.controlnet.scale = 9.0
-_C.controlnet.eta = 1.0
-_C.controlnet.seed = 12345
-_C.controlnet.prompt = ''
-_C.controlnet.a_prompt = ''
-_C.controlnet.n_prompt = ''
-
-def get_cfg_defaults():
-    return _C.clone()
+@dataclass
+class Config:
+    mesh_opt_cfg: MeshOptConfig
+    mv_control_cfg: MVControlConfig
+    sv_control_cfg: SVControlConfig
+    save_dir: str
+    mesh_path: str
+    mesh_scale: float
+    num_iters: int
