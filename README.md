@@ -10,8 +10,9 @@ cd geometry-opt
 conda create -n geometry-opt -y python=3.9
 conda activate geometry-opt
 
-# cuda
+# install libraries
 pip install -r requirements.txt
+pip install git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
 
 # install torch_scatter
 See here: https://github.com/rusty1s/pytorch_scatter
