@@ -7,8 +7,14 @@ git clone https://git.azr.adobeitc.com/yunchunc/geometry-opt.git
 cd geometry-opt
 
 # conda env
-conda env create -f environment.yaml
+conda create -n geometry-opt -y python=3.9
 conda activate geometry-opt
+
+# cuda
+pip install -r requirements.txt
+
+# install torch_scatter
+See here: https://github.com/rusty1s/pytorch_scatter
 
 # cuda
 conda install -c conda-forge cudatoolkit-dev
@@ -20,59 +26,55 @@ cd nvdiffrast
 pip install .
 ```
 
-## Test nvdiffrast (optional)
+## Download (single-view) ControlNet checkpoints
 ```
-cd nvdiffrast/samples/torch
-python triangle.py --cuda
-python cube.py --resolution 16 --outdir cube
-python earth.py --outdir earth
-python earth.py --mip --outdir earth-mip
-python envphong.py --outdir envphong
-python pose.py --outdir pose
-```
-
-## Download ControlNet checkpoints
-```
-cd ../controlnet_lib/models
+cd ../svcontrol_lib/models
+# download ControlNet checkpoints and put them in svcontrol_lib/models
 wget https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned.ckpt
 wget https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11f1p_sd15_depth.pth
-wget https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_normalbae.pth
-wget https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_canny.pth
 ```
 
-## Install Segment Anything
+## Download Segment Anything checkpoint
 ```
-pip install git+https://github.com/facebookresearch/segment-anything.git
-
-# download checkpoints to sam_lib/checkpoints
+# download segment anything checkpoint and put it in mvcontrol_lib/ckpts/sam
 wget https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth
 ```
 
-## Test the pipeline
+## Download Wonder3D checkpoints
 ```
-# test ControlNet: mesh -> render depth -> ControlNet -> RGB image -> MiDaS -> pred depth
-python depth_render_demo.py ../data/sphere.ply
-```
-
-## Blender
-
-### Download from the website
-```
-# download it to the home directory
-wget https://mirrors.ocf.berkeley.edu/blender/release/Blender3.6/blender-3.6.1-linux-x64.tar.xz
-
-# unzip the file
-tar Jxvf blender-3.6.1-linux-x64.tar.xz
-
-# in bashrc, add
-alias blender="~/blender-3.6.1-linux-x64/blender"
+# download everything from the link below and put them in mvcontrol_lib/ckpts
+Link: https://huggingface.co/flamehaze1115/wonder3d-v1.0/tree/main
 ```
 
-### Copy from sensei-fs
+## Download Multi-view ControlNet checkpoint
 ```
-# copy it to the home directory
-cp -r /sensei-fs/users/yunchunc/blender-3.6.1-linux-x64 ~/.
+# download it from the link below, unzip it, and put it in mvcontrol_lib/ckpts
+Link: https://drive.google.com/file/d/1EfjtELUOiPr5ANzE-GSV5JOuXfc9_ecv/view?usp=sharing
+```
 
-# in bashrc, add
-alias blender="~/blender-3.6.1-linux-x64/blender"
+## Folder structure
+```
+# the mv_control_lib/ckpts folder should look like below
+
+├── ckpts
+│   ├── controlnet
+│   ├── feature_extractor
+│   ├── image_encoder
+│   ├── model_index.json
+│   ├── sam
+│   ├── scheduler
+│   ├── unet
+│   └── vae
+```
+
+## Run in headless mode
+```
+bash script/demo.sh
+```
+
+## Run gradio demo 
+```
+python gradio_demo_full.py
+
+# then copy paste the link from gradio to your web browser
 ```

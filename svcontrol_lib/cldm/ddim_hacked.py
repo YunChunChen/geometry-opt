@@ -56,7 +56,7 @@ class DDIMSampler(object):
                S,
                batch_size,
                shape,
-               strength,
+               guidance_strength,
                conditioning=None,
                callback=None,
                normals_sequence=None,
@@ -103,7 +103,7 @@ class DDIMSampler(object):
 
         samples, intermediates = self.ddim_sampling(conditioning, 
                                                     size,
-                                                    strength=strength,
+                                                    guidance_strength=guidance_strength,
                                                     callback=callback,
                                                     img_callback=img_callback,
                                                     quantize_denoised=quantize_x0,
@@ -123,7 +123,7 @@ class DDIMSampler(object):
         return samples, intermediates
 
     @torch.no_grad()
-    def ddim_sampling(self, cond, shape, strength,
+    def ddim_sampling(self, cond, shape, guidance_strength,
                       x_T=None, ddim_use_original_steps=False,
                       callback=None, timesteps=None, quantize_denoised=False,
                       mask=None, x0=None, img_callback=None, log_every_t=100,
@@ -151,6 +151,12 @@ class DDIMSampler(object):
         iterator = tqdm(time_range, desc='DDIM Sampler', total=total_steps)
 
         for i, step in enumerate(iterator):
+
+            if i < total_steps * guidance_strength:
+                use_control = True
+            else:
+                use_control = False
+
             index = total_steps - i - 1
             ts = torch.full((b,), step, device=device, dtype=torch.long)
 
@@ -163,7 +169,7 @@ class DDIMSampler(object):
                 assert len(ucg_schedule) == len(time_range)
                 unconditional_guidance_scale = ucg_schedule[i]
 
-            outs = self.p_sample_ddim(img, cond, ts, strength=strength, index=index, use_original_steps=ddim_use_original_steps,
+            outs = self.p_sample_ddim(img, cond, ts, use_control=use_control, index=index, use_original_steps=ddim_use_original_steps,
                                       quantize_denoised=quantize_denoised, temperature=temperature,
                                       noise_dropout=noise_dropout, score_corrector=score_corrector,
                                       corrector_kwargs=corrector_kwargs,
@@ -181,7 +187,7 @@ class DDIMSampler(object):
         return img, intermediates
 
     @torch.no_grad()
-    def p_sample_ddim(self, x, c, t, index, strength, repeat_noise=False, use_original_steps=False, quantize_denoised=False,
+    def p_sample_ddim(self, x, c, t, index, use_control, repeat_noise=False, use_original_steps=False, quantize_denoised=False,
                       temperature=1., noise_dropout=0., score_corrector=None, corrector_kwargs=None,
                       unconditional_guidance_scale=1., unconditional_conditioning=None,
                       dynamic_threshold=None):
@@ -193,8 +199,8 @@ class DDIMSampler(object):
             #model_t = self.model.apply_model(x, t, c)
             #model_uncond = self.model.apply_model(x, t, unconditional_conditioning)
 
-            model_t = self.model.apply_model(x, t, c, strength)
-            model_uncond = self.model.apply_model(x, t, unconditional_conditioning, strength)
+            model_t = self.model.apply_model(x, t, c, use_control)
+            model_uncond = self.model.apply_model(x, t, unconditional_conditioning, use_control)
             model_output = model_uncond + unconditional_guidance_scale * (model_t - model_uncond)
 
         if self.model.parameterization == "v":

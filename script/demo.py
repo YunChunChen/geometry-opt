@@ -9,6 +9,8 @@ import numpy as np
 import argparse
 import gc
 from omegaconf import OmegaConf
+import igl
+import trimesh
 
 import torch
 import torch.nn.functional as F
@@ -54,7 +56,7 @@ def main(cfg):
     # generate one RGB image
     # - shape: num_samples (1) x 3 x h x w [-1, 1]
     print("Generating RGB images from depth renderings...")
-    sv_rgb = svcontrolnet.generate_rgb(geom_image=render_sv_depth)
+    sv_rgb = svcontrolnet.generate_rgb(geom_image=render_sv_depth, guidance_strength=cfg.sv_control_cfg.guidance_strength)
 
     # save rgb as png
     save_path = '{}/sv_rgb.png'.format(cfg.save_dir)
@@ -101,7 +103,13 @@ def main(cfg):
     # generate multi-view RGBs and normals
     # - shape: num_views x 3 x H x W
     print("Generating multi-view RGBs and normals...")
-    mv_normals, mv_rgbs = mvcontrolnet.generate(sv_rgb=sv_rgb[0], sv_seg=sv_mask, mv_normal=render_mv_normal, mv_seg=render_mv_seg)
+    mv_normals, mv_rgbs = mvcontrolnet.generate(
+        sv_rgb=sv_rgb[0], 
+        sv_seg=sv_mask, 
+        mv_normal=render_mv_normal, 
+        mv_seg=render_mv_seg,
+        mv_guidance_strength=cfg.mv_control_cfg.guidance_strength
+    )
 
     # predict segmentation
     mv_rgbs_cpu = mv_rgbs.permute(0,2,3,1).data.cpu().numpy() * 255
@@ -191,7 +199,6 @@ def main(cfg):
         save_path = '{}/final_seg_{}.png'.format(cfg.save_dir, i)
         lib.util.save_seg(render_seg[i], save_path)
 
-    import igl
     # save final mesh
     save_path = '{}/final_mesh.obj'.format(cfg.save_dir)
     igl.write_triangle_mesh(
@@ -200,7 +207,6 @@ def main(cfg):
         faces.data.cpu().numpy()
     )
 
-    import trimesh
     # save as glb
     glb_path = '{}/final_mesh.glb'.format(cfg.save_dir)
     final_mesh = trimesh.load(save_path)
@@ -212,9 +218,9 @@ def main(cfg):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--sv_cfg', default='', type=str)
-    parser.add_argument('--sv_strength', default=1.0, type=float)
+    parser.add_argument('--sv_guidance_strength', default=1.0, type=float)
     parser.add_argument('--mv_cfg', default='', type=str)
-    parser.add_argument('--mv_strength', default=1.0, type=float)
+    parser.add_argument('--mv_guidance_strength', default=1.0, type=float)
     parser.add_argument('--num_iters', default=1000, type=int)
     parser.add_argument('--save_dir', default='', type=str)
     parser.add_argument('--mesh_path', default='', type=str)
@@ -227,14 +233,14 @@ if __name__ == '__main__':
     schema = OmegaConf.structured(lib.config.SVControlConfig)
     sv_cfg = OmegaConf.load(args.sv_cfg)
     sv_cfg = OmegaConf.merge(schema, sv_cfg)
-    sv_cfg.strength = args.sv_strength
+    sv_cfg.guidance_strength = args.sv_guidance_strength
     sv_cfg.prompt = args.prompt
 
     # multi-view controlnet config
     schema = OmegaConf.structured(lib.config.MVControlConfig)
     mv_cfg = OmegaConf.load(args.mv_cfg)
     mv_cfg = OmegaConf.merge(schema, mv_cfg)
-    mv_cfg.strength = args.mv_strength
+    mv_cfg.guidance_strength = args.mv_guidance_strength
 
     # all config
     cfg = OmegaConf.structured(lib.config.Config)

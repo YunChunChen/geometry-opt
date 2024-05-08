@@ -124,11 +124,17 @@ def save_images(
 
 def normalize_vertices(
         vertices:torch.Tensor, #V,3
+        return_scale=False
     ):
     """shift and resize mesh to fit into a unit sphere"""
     vertices -= (vertices.min(dim=0)[0] + vertices.max(dim=0)[0]) / 2
-    vertices /= torch.norm(vertices, dim=-1).max()
-    return vertices
+    #vertices /= torch.norm(vertices, dim=-1).max()
+    scale = torch.norm(vertices, dim=-1).max()
+    vertices /= scale
+    if return_scale:
+        return vertices, scale
+    else:
+        return vertices
 
 def laplacian(
         num_verts:int,

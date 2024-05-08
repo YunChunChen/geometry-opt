@@ -107,7 +107,7 @@ class MVControlNet:
         return camera_task_embeddings
 
     @torch.no_grad()
-    def generate(self, sv_rgb, sv_seg, mv_normal, mv_seg, bg_color='black'):
+    def generate(self, sv_rgb, sv_seg, mv_normal, mv_seg, mv_guidance_strength,  bg_color='black'):
 
         _, _, h, w = mv_normal.size()
 
@@ -201,6 +201,7 @@ class MVControlNet:
                 rgb_in, 
                 camera_task_embeddings, 
                 control_image=normal_in,
+                mv_guidance_strength=mv_guidance_strength,
                 generator=generator, 
                 guidance_scale=guidance_scale, 
                 output_type='pt', 

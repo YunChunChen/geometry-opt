@@ -8,11 +8,14 @@ class Mesh:
 
     def __init__(self, mesh_path, mesh_scale):
         self.verts, self.faces = load_obj(mesh_path)
-        self.verts = normalize_vertices(self.verts)
+        self.verts, self.normalize_scale = normalize_vertices(self.verts, return_scale=True)
         self.scale_mesh(mesh_scale)
 
     def scale_mesh(self, mesh_scale):
         self.verts = self.verts * mesh_scale
+
+    def get_normalize_scale(self):
+        return self.normalize_scale
 
     def get_vertices(self):
         return self.verts

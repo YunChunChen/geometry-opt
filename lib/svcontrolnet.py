@@ -32,7 +32,7 @@ from svcontrol_lib.cldm.ddim_hacked import DDIMSampler
 
 class SVControlNet:
     
-    def __init__(self, cfg, guidance=1.0):
+    def __init__(self, cfg):
         self.num_samples = cfg.num_samples
         self.ddim_steps = cfg.ddim_steps
         self.eta = cfg.eta
@@ -43,7 +43,6 @@ class SVControlNet:
         self.prompt = cfg.prompt
         self.a_prompt = cfg.a_prompt
         self.n_prompt = cfg.n_prompt
-        self.guidance = guidance
 
     @torch.no_grad()
     def get_depth_network(self):
@@ -99,7 +98,7 @@ class SVControlNet:
         return ddim_sampler
 
     @torch.no_grad()
-    def generate_rgb(self, geom_image):
+    def generate_rgb(self, geom_image, guidance_strength):
 
         if self.input_mode == 'depth':
             controlnet = self.get_depth_network()
@@ -146,7 +145,7 @@ class SVControlNet:
             self.ddim_steps, 
             self.num_samples,
             shape, 
-            self.guidance,
+            guidance_strength,
             cond, 
             verbose=False, 
             eta=self.eta,

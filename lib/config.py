@@ -9,6 +9,7 @@ class SVControlConfig:
     ddim_steps: int = 20
     guess_mode: bool = False
     strength: float = 1.0
+    guidance_strength: float = 1.0
     scale: float = 9.0
     eta: float = 1.0
     seed: int = 12345
@@ -27,7 +28,7 @@ class MVControlConfig:
     pipe_kwargs: Dict
     validation_guidance_scales: List[float]
     unet_from_pretrained_kwargs: Dict
-    strength: float = 1.0
+    guidance_strength: float = 1.0
     resolution: int = 256
 
 @dataclass

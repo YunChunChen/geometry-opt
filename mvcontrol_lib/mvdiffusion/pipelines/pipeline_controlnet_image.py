@@ -299,6 +299,7 @@ class MVControlNetImagePipeline(DiffusionPipeline):
         image: Union[List[PIL.Image.Image], torch.FloatTensor],
         camera_embedding: Optional[torch.FloatTensor]=None,
         control_image: Optional[Union[List[PIL.Image.Image], torch.FloatTensor]] = None,
+        mv_guidance_strength: float = 1.0,
         height: Optional[int] = None,
         width: Optional[int] = None,
         num_inference_steps: int = 50,
@@ -393,25 +394,35 @@ class MVControlNetImagePipeline(DiffusionPipeline):
                 latent_model_input = torch.cat([latent_model_input, image_latents], dim=1)
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
-                # controlnet inference
-                down_block_res_samples, mid_block_res_sample = self.controlnet(
-                    latent_model_input, 
-                    t,
-                    encoder_hidden_states=image_embeddings,
-                    class_labels=camera_embeddings,
-                    controlnet_cond=control_image,
-                    return_dict=False
-                )
+                if i < len(timesteps) * mv_guidance_strength:
+                    # controlnet inference
+                    down_block_res_samples, mid_block_res_sample = self.controlnet(
+                        latent_model_input, 
+                        t,
+                        encoder_hidden_states=image_embeddings,
+                        class_labels=camera_embeddings,
+                        controlnet_cond=control_image,
+                        return_dict=False
+                    )
 
-                # predict the noise residual
-                noise_pred = self.unet(
-                    latent_model_input, 
-                    t, 
-                    encoder_hidden_states=image_embeddings, 
-                    class_labels=camera_embeddings,
-                    down_block_additional_residuals=[sample.to(dtype) for sample in down_block_res_samples],
-                    mid_block_additional_residual=mid_block_res_sample.to(dtype)
-                ).sample
+                    # predict the noise residual
+                    noise_pred = self.unet(
+                        latent_model_input, 
+                        t, 
+                        encoder_hidden_states=image_embeddings, 
+                        class_labels=camera_embeddings,
+                        down_block_additional_residuals=[sample.to(dtype) for sample in down_block_res_samples],
+                        mid_block_additional_residual=mid_block_res_sample.to(dtype)
+                    ).sample
+
+                else:
+                    # predict the noise residual
+                    noise_pred = self.unet(
+                        latent_model_input, 
+                        t, 
+                        encoder_hidden_states=image_embeddings, 
+                        class_labels=camera_embeddings
+                    ).sample
 
                 # perform guidance
                 if do_classifier_free_guidance:
