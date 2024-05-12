@@ -15,6 +15,10 @@ import torchvision
 
 from segment_anything import sam_model_registry, SamPredictor
 
+def read_rgb(path):
+    img = imageio.imread(path)
+    return img
+
 def save_rgb(image, save_path):
     image_np = (
         einops.rearrange(image, 'c h w -> h w c') * 127.5 + 127.5

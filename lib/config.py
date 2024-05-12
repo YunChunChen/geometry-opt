@@ -44,3 +44,4 @@ class Config:
     mesh_path: str
     mesh_scale: float
     num_iters: int
+    resume_from_sv: bool

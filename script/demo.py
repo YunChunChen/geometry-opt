@@ -26,7 +26,6 @@ from meshopt_lib.util.func import make_wonder3d_cameras
 from meshopt_lib.core.opt import MeshOptimizer
 
 def main(cfg):
-
     # initialize mesh
     mesh = Mesh(mesh_path=cfg.mesh_path, mesh_scale=cfg.mesh_scale)
 
@@ -34,33 +33,39 @@ def main(cfg):
     verts = mesh.get_vertices()
     faces = mesh.get_faces()
 
-    # --- single-view RGB generation
+    if not cfg.resume_from_sv:
+        # --- single-view RGB generation
 
-    # initialize renderer
-    mv, proj = make_wonder3d_cameras()
-    mv = mv[:1,:,:]
-    sv_res = cfg.sv_control_cfg.resolution
-    sv_renderer = Renderer(mv, proj, [sv_res, sv_res])
+        # initialize renderer
+        mv, proj = make_wonder3d_cameras()
+        mv = mv[:1,:,:]
+        sv_res = cfg.sv_control_cfg.resolution
+        sv_renderer = Renderer(mv, proj, [sv_res, sv_res])
 
-    # render normalized inverse depth
-    # - shape: 1 x h x w
-    render_sv_depth = sv_renderer.render_depth(verts, faces, normalize=True)
+        # render normalized inverse depth
+        # - shape: 1 x h x w
+        render_sv_depth = sv_renderer.render_depth(verts, faces, normalize=True)
 
-    # save depth
-    save_path = '{}/init_depth.png'.format(cfg.save_dir)
-    lib.util.save_depth(render_sv_depth[0], save_path, cmap=True)
+        # save depth
+        save_path = '{}/init_depth.png'.format(cfg.save_dir)
+        lib.util.save_depth(render_sv_depth[0], save_path, cmap=True)
 
-    # initialize single-view controlnet
-    svcontrolnet = SVControlNet(cfg.sv_control_cfg)
+        # initialize single-view controlnet
+        svcontrolnet = SVControlNet(cfg.sv_control_cfg)
 
-    # generate one RGB image
-    # - shape: num_samples (1) x 3 x h x w [-1, 1]
-    print("Generating RGB images from depth renderings...")
-    sv_rgb = svcontrolnet.generate_rgb(geom_image=render_sv_depth, guidance_strength=cfg.sv_control_cfg.guidance_strength)
+        # generate one RGB image
+        # - shape: num_samples (1) x 3 x h x w [-1, 1]
+        print("Generating RGB images from depth renderings...")
+        sv_rgb = svcontrolnet.generate_rgb(geom_image=render_sv_depth, guidance_strength=cfg.sv_control_cfg.guidance_strength)
 
-    # save rgb as png
-    save_path = '{}/sv_rgb.png'.format(cfg.save_dir)
-    lib.util.save_rgb(sv_rgb[0], save_path)
+        # save rgb as png
+        save_path = '{}/sv_rgb.png'.format(cfg.save_dir)
+        lib.util.save_rgb(sv_rgb[0], save_path)
+    else:
+        # load in pre-generated sv_rgb
+        sv_rgb_path = '{}/sv_rgb.png'.format(cfg.save_dir)
+        sv_rgb = lib.util.read_rgb(sv_rgb_path)[None,...]
+        sv_rgb = (torch.from_numpy(sv_rgb).permute(0,3,1,2).to('cuda').float() - 127.5) / 127.5
 
     # initialize segment anything
     seg_predictor = lib.util.sam_init()
@@ -215,6 +220,18 @@ def main(cfg):
 
     return
 
+def str2bool(v):
+    '''str2bool type for argparser'''
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--sv_cfg', default='', type=str)
@@ -226,6 +243,7 @@ if __name__ == '__main__':
     parser.add_argument('--mesh_path', default='', type=str)
     parser.add_argument('--mesh_scale', default='', type=str)
     parser.add_argument('--prompt', default='', type=str)
+    parser.add_argument('--resume_from_sv', default='false', type=str2bool)
 
     args = parser.parse_args()
 
@@ -250,6 +268,7 @@ if __name__ == '__main__':
     cfg.mesh_path = args.mesh_path
     cfg.mesh_scale = args.mesh_scale
     cfg.num_iters = args.num_iters
+    cfg.resume_from_sv = args.resume_from_sv
 
     # save dir
     os.makedirs(cfg.save_dir, exist_ok=True)
